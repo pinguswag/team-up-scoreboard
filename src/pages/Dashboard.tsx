@@ -7,17 +7,29 @@ import { useAuth } from '@/hooks/useAuth';
 import { useFavoriteTeams } from '@/hooks/useFavoriteTeams';
 import { useSchedule } from '@/hooks/useSchedule';
 import { getLeagueColor, League, LEAGUES, LEAGUE_STATUS } from '@/data/teams';
+import { 
+  DateFilter, 
+  matchesDateFilter, 
+  getDateLabel,
+  getTodayISO,
+  NormalizedFixture 
+} from '@/lib/scheduleUtils';
 import { CalendarDays, Settings, LogOut, Loader2, Clock, Trophy, Construction } from 'lucide-react';
-import { format, parseISO, isToday, isTomorrow } from 'date-fns';
-import { ko } from 'date-fns/locale';
+
+const FILTER_OPTIONS: { value: DateFilter; label: string }[] = [
+  { value: 'today', label: 'Today' },
+  { value: 'week', label: 'This Week' },
+  { value: 'all', label: 'All' },
+];
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const { user, signOut, loading: authLoading } = useAuth();
   const { favoriteTeams, loading: teamsLoading } = useFavoriteTeams(user?.id);
   const [activeLeague, setActiveLeague] = useState<League>('EPL');
+  const [dateFilter, setDateFilter] = useState<DateFilter>('today');
   
-  const { games, loading: scheduleLoading, error: scheduleError } = useSchedule(favoriteTeams, activeLeague);
+  const { fixtures, loading: scheduleLoading, error: scheduleError } = useSchedule(favoriteTeams, activeLeague);
 
   const loading = authLoading || teamsLoading;
   const isLeagueActive = LEAGUE_STATUS[activeLeague].active;
@@ -27,30 +39,33 @@ const Dashboard = () => {
     return favoriteTeams.filter(t => t.league === activeLeague).length;
   }, [favoriteTeams, activeLeague]);
 
+  // 필터링된 일정
+  const filteredFixtures = useMemo(() => {
+    return fixtures.filter(f => matchesDateFilter(f.dateISO, dateFilter));
+  }, [fixtures, dateFilter]);
+
   // 일정을 날짜별로 그룹핑
-  const groupedGames = useMemo(() => {
-    const grouped: Record<string, typeof games> = {};
-    games.forEach((game) => {
-      if (!grouped[game.date]) {
-        grouped[game.date] = [];
+  const groupedFixtures = useMemo(() => {
+    const grouped: Record<string, NormalizedFixture[]> = {};
+    filteredFixtures.forEach((fixture) => {
+      const key = fixture.dateISO || 'unknown';
+      if (!grouped[key]) {
+        grouped[key] = [];
       }
-      grouped[game.date].push(game);
+      grouped[key].push(fixture);
     });
     return Object.entries(grouped)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, dateGames]) => ({ date, games: dateGames }));
-  }, [games]);
+      .sort(([a], [b]) => {
+        if (a === 'unknown') return 1;
+        if (b === 'unknown') return -1;
+        return a.localeCompare(b);
+      })
+      .map(([dateISO, dateFixtures]) => ({ dateISO, fixtures: dateFixtures }));
+  }, [filteredFixtures]);
 
   const handleSignOut = async () => {
     await signOut();
     navigate('/auth');
-  };
-
-  const getDateLabel = (dateStr: string) => {
-    const date = parseISO(dateStr);
-    if (isToday(date)) return '오늘';
-    if (isTomorrow(date)) return '내일';
-    return format(date, 'M월 d일 (EEE)', { locale: ko });
   };
 
   if (loading) {
@@ -65,6 +80,8 @@ const Dashboard = () => {
     navigate('/auth');
     return null;
   }
+
+  const todayISO = getTodayISO();
 
   return (
     <div className="min-h-screen bg-background">
@@ -187,74 +204,102 @@ const Dashboard = () => {
                   </Button>
                 </CardContent>
               </Card>
-            ) : scheduleLoading ? (
-              // 로딩 중
-              <div className="flex items-center justify-center py-16">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              </div>
-            ) : scheduleError ? (
-              // 에러
-              <Card className="glass border-destructive/30">
-                <CardContent className="p-8 text-center">
-                  <p className="text-destructive">{scheduleError}</p>
-                </CardContent>
-              </Card>
-            ) : groupedGames.length === 0 ? (
-              // 일정 없음
-              <Card className="glass border-border/50">
-                <CardContent className="p-8 text-center">
-                  <CalendarDays className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground">예정된 경기가 없습니다</p>
-                </CardContent>
-              </Card>
             ) : (
-              // 일정 표시
-              <section className="space-y-6">
-                <div className="flex items-center gap-2">
-                  <CalendarDays className="h-5 w-5 text-primary" />
-                  <h2 className="text-xl font-display font-bold text-foreground">경기 일정</h2>
+              // 일정 섹션
+              <section className="space-y-4">
+                {/* 헤더 + 필터 */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CalendarDays className="h-5 w-5 text-primary" />
+                    <h2 className="text-xl font-display font-bold text-foreground">경기 일정</h2>
+                  </div>
+                  
+                  {/* Date Filter */}
+                  <div className="flex gap-1 bg-muted rounded-lg p-1">
+                    {FILTER_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        onClick={() => setDateFilter(option.value)}
+                        className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                          dateFilter === option.value
+                            ? 'bg-background text-foreground shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                {groupedGames.map(({ date, games: dateGames }) => (
-                  <div key={date} className="space-y-3">
-                    <Badge
-                      variant={isToday(parseISO(date)) ? 'default' : 'secondary'}
-                      className={isToday(parseISO(date)) ? 'gradient-primary' : ''}
-                    >
-                      {getDateLabel(date)}
-                    </Badge>
-                    
-                    <div className="space-y-2">
-                      {dateGames.map((game) => (
-                        <Card key={game.id} className="glass border-border/50 hover:border-primary/30 transition-all">
-                          <CardContent className="p-4">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-3 flex-1 min-w-0">
-                                {game.time && (
-                                  <div className="flex items-center gap-1 text-sm text-muted-foreground flex-shrink-0">
-                                    <Clock className="h-4 w-4" />
-                                    {game.time}
-                                  </div>
-                                )}
-                                <div className="flex-1 min-w-0">
-                                  <p className="font-medium text-foreground truncate">
-                                    {game.away_team} @ {game.home_team}
-                                  </p>
-                                  {game.day && (
-                                    <p className="text-xs text-muted-foreground">{game.day}</p>
-                                  )}
-                                </div>
-                              </div>
-                              <Badge className={`${getLeagueColor(game.league)} text-primary-foreground text-xs flex-shrink-0 ml-2`}>
-                                {game.league}
-                              </Badge>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
+                {/* 로딩/에러/빈 결과/일정 */}
+                {scheduleLoading ? (
+                  <div className="flex items-center justify-center py-16">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
                   </div>
-                ))}
+                ) : scheduleError ? (
+                  <Card className="glass border-destructive/30">
+                    <CardContent className="p-8 text-center">
+                      <p className="text-destructive">{scheduleError}</p>
+                    </CardContent>
+                  </Card>
+                ) : groupedFixtures.length === 0 ? (
+                  <Card className="glass border-border/50">
+                    <CardContent className="p-8 text-center">
+                      <CalendarDays className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                      <p className="text-muted-foreground">
+                        {dateFilter === 'today' 
+                          ? '오늘 예정된 경기가 없습니다' 
+                          : dateFilter === 'week'
+                            ? '이번 주 예정된 경기가 없습니다'
+                            : '예정된 경기가 없습니다'}
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="space-y-6">
+                    {groupedFixtures.map(({ dateISO, fixtures: dateFixtures }) => (
+                      <div key={dateISO} className="space-y-3">
+                        <Badge
+                          variant={dateISO === todayISO ? 'default' : 'secondary'}
+                          className={dateISO === todayISO ? 'gradient-primary' : ''}
+                        >
+                          {getDateLabel(dateISO)}
+                        </Badge>
+                        
+                        <div className="space-y-2">
+                          {dateFixtures.map((fixture) => (
+                            <Card key={fixture.id} className="glass border-border/50 hover:border-primary/30 transition-all">
+                              <CardContent className="p-4">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                                    {fixture.time && (
+                                      <div className="flex items-center gap-1 text-sm text-muted-foreground flex-shrink-0">
+                                        <Clock className="h-4 w-4" />
+                                        {fixture.time}
+                                      </div>
+                                    )}
+                                    <div className="flex-1 min-w-0">
+                                      <p className="font-medium text-foreground truncate">
+                                        {fixture.awayTeam} @ {fixture.homeTeam}
+                                      </p>
+                                      {fixture.weekLabel && (
+                                        <p className="text-xs text-muted-foreground">{fixture.weekLabel}</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <Badge className={`${getLeagueColor(fixture.league)} text-primary-foreground text-xs flex-shrink-0 ml-2`}>
+                                    {fixture.league}
+                                  </Badge>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </section>
             )}
 

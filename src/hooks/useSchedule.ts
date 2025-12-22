@@ -1,26 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase, type FavoriteTeam } from '@/lib/supabase';
 import { League, TEAMS, LEAGUE_STATUS } from '@/data/teams';
-
-export type ScheduleGame = {
-  id: string;
-  league: League;
-  date: string;
-  time?: string;
-  day?: string;
-  home_team: string;
-  away_team: string;
-};
+import { 
+  NormalizedFixture, 
+  normalizeFixture, 
+  sortFixtures 
+} from '@/lib/scheduleUtils';
 
 export const useSchedule = (favoriteTeams: FavoriteTeam[], activeLeague: League) => {
-  const [games, setGames] = useState<ScheduleGame[]>([]);
+  const [fixtures, setFixtures] = useState<NormalizedFixture[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchSchedule = useCallback(async () => {
     // 리그가 준비중이면 빈 배열
     if (!LEAGUE_STATUS[activeLeague].active) {
-      setGames([]);
+      setFixtures([]);
       setLoading(false);
       return;
     }
@@ -29,7 +24,7 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[], activeLeague: League)
     const selectedTeams = favoriteTeams.filter(t => t.league === activeLeague);
     
     if (selectedTeams.length === 0) {
-      setGames([]);
+      setFixtures([]);
       setLoading(false);
       return;
     }
@@ -54,42 +49,26 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[], activeLeague: League)
         .or(
           teamFullNames.map(name => `home_team.eq.${name}`).join(',') + ',' +
           teamFullNames.map(name => `away_team.eq.${name}`).join(',')
-        )
-        .order('date', { ascending: true });
+        );
 
       if (queryError) {
         console.error('Schedule fetch error:', queryError);
         setError(queryError.message);
-        setGames([]);
+        setFixtures([]);
       } else {
-        // 데이터 변환 및 정렬
-        const formattedGames: ScheduleGame[] = (data || []).map((row: any) => ({
-          id: row.id || `${row.date}-${row.home_team}-${row.away_team}`,
-          league: activeLeague,
-          date: row.date,
-          time: row.time || undefined,
-          day: row.day || undefined,
-          home_team: row.home_team,
-          away_team: row.away_team,
-        }));
+        // Normalize all fixtures
+        const normalizedFixtures = (data || []).map((row: any) => 
+          normalizeFixture(row, activeLeague)
+        );
 
-        // 정렬: date 오름차순, time 오름차순 (없으면 뒤로)
-        formattedGames.sort((a, b) => {
-          const dateCompare = a.date.localeCompare(b.date);
-          if (dateCompare !== 0) return dateCompare;
-          
-          if (!a.time && !b.time) return 0;
-          if (!a.time) return 1;
-          if (!b.time) return -1;
-          return a.time.localeCompare(b.time);
-        });
-
-        setGames(formattedGames);
+        // Sort and set
+        const sorted = sortFixtures(normalizedFixtures);
+        setFixtures(sorted);
       }
     } catch (err) {
       console.error('Schedule fetch error:', err);
       setError('일정을 불러오는데 실패했습니다');
-      setGames([]);
+      setFixtures([]);
     } finally {
       setLoading(false);
     }
@@ -100,7 +79,7 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[], activeLeague: League)
   }, [fetchSchedule]);
 
   return {
-    games,
+    fixtures,
     loading,
     error,
     refetch: fetchSchedule,
