@@ -1,75 +1,56 @@
-import { useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/hooks/useAuth';
 import { useFavoriteTeams } from '@/hooks/useFavoriteTeams';
-import { DUMMY_GAMES, Game } from '@/data/games';
-import { getLeagueColor, getLeagueTextColor, League } from '@/data/teams';
-import { CalendarDays, Settings, LogOut, Loader2, Tv, Clock, Trophy } from 'lucide-react';
-import { format, isToday, addDays, isSameDay, parseISO } from 'date-fns';
+import { useSchedule } from '@/hooks/useSchedule';
+import { getLeagueColor, League, LEAGUES, LEAGUE_STATUS } from '@/data/teams';
+import { CalendarDays, Settings, LogOut, Loader2, Clock, Trophy, Construction } from 'lucide-react';
+import { format, parseISO, isToday, isTomorrow } from 'date-fns';
 import { ko } from 'date-fns/locale';
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const { user, signOut, loading: authLoading } = useAuth();
   const { favoriteTeams, loading: teamsLoading } = useFavoriteTeams(user?.id);
+  const [activeLeague, setActiveLeague] = useState<League>('EPL');
+  
+  const { games, loading: scheduleLoading, error: scheduleError } = useSchedule(favoriteTeams, activeLeague);
 
   const loading = authLoading || teamsLoading;
+  const isLeagueActive = LEAGUE_STATUS[activeLeague].active;
 
-  // Filter games for favorite teams
-  const myGames = useMemo(() => {
-    const favoriteTeamCodes = favoriteTeams.map((t) => ({
-      code: t.team_code,
-      league: t.league,
-    }));
+  // 해당 리그의 선택된 팀 수
+  const selectedTeamsCount = useMemo(() => {
+    return favoriteTeams.filter(t => t.league === activeLeague).length;
+  }, [favoriteTeams, activeLeague]);
 
-    return DUMMY_GAMES.filter((game) =>
-      favoriteTeamCodes.some(
-        (team) =>
-          (game.homeTeamCode === team.code || game.awayTeamCode === team.code) &&
-          game.league === team.league
-      )
-    );
-  }, [favoriteTeams]);
-
-  // Today's games
-  const todayGames = useMemo(() => {
-    const today = new Date();
-    return myGames.filter((game) => isToday(parseISO(game.date)));
-  }, [myGames]);
-
-  // This week's games (grouped by date)
-  const weekGames = useMemo(() => {
-    const today = new Date();
-    const weekEnd = addDays(today, 7);
-    
-    const games = myGames.filter((game) => {
-      const gameDate = parseISO(game.date);
-      return gameDate >= today && gameDate <= weekEnd;
-    });
-
-    // Group by date
-    const grouped: Record<string, Game[]> = {};
+  // 일정을 날짜별로 그룹핑
+  const groupedGames = useMemo(() => {
+    const grouped: Record<string, typeof games> = {};
     games.forEach((game) => {
       if (!grouped[game.date]) {
         grouped[game.date] = [];
       }
       grouped[game.date].push(game);
     });
-
     return Object.entries(grouped)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, games]) => ({
-        date,
-        games: games.sort((a, b) => a.time.localeCompare(b.time)),
-      }));
-  }, [myGames]);
+      .map(([date, dateGames]) => ({ date, games: dateGames }));
+  }, [games]);
 
   const handleSignOut = async () => {
     await signOut();
     navigate('/auth');
+  };
+
+  const getDateLabel = (dateStr: string) => {
+    const date = parseISO(dateStr);
+    if (isToday(date)) return '오늘';
+    if (isTomorrow(date)) return '내일';
+    return format(date, 'M월 d일 (EEE)', { locale: ko });
   };
 
   if (loading) {
@@ -84,49 +65,6 @@ const Dashboard = () => {
     navigate('/auth');
     return null;
   }
-
-  const getBroadcastStyle = (broadcast: string) => {
-    if (broadcast === '쿠팡플레이') return 'bg-[hsl(350,80%,50%)] text-primary-foreground';
-    if (broadcast === 'SPOTV') return 'bg-[hsl(200,90%,45%)] text-primary-foreground';
-    return 'bg-muted text-muted-foreground';
-  };
-
-  const GameCard = ({ game }: { game: Game }) => (
-    <Card className="glass border-border/50 hover:border-primary/30 transition-all">
-      <CardContent className="p-4">
-        <div className="flex items-center justify-between mb-3">
-          <Badge className={`${getLeagueColor(game.league)} text-primary-foreground text-xs`}>
-            {game.league}
-          </Badge>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Clock className="h-4 w-4" />
-            {game.time}
-          </div>
-        </div>
-        
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex-1 text-center">
-            <p className="font-display font-bold text-lg text-foreground">{game.homeTeamCode}</p>
-            <p className="text-xs text-muted-foreground truncate">{game.homeTeam}</p>
-          </div>
-          <div className="px-4">
-            <span className="text-xl font-bold text-muted-foreground">VS</span>
-          </div>
-          <div className="flex-1 text-center">
-            <p className="font-display font-bold text-lg text-foreground">{game.awayTeamCode}</p>
-            <p className="text-xs text-muted-foreground truncate">{game.awayTeam}</p>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-center">
-          <Badge variant="secondary" className={`${getBroadcastStyle(game.broadcast)}`}>
-            <Tv className="h-3 w-3 mr-1" />
-            {game.broadcast}
-          </Badge>
-        </div>
-      </CardContent>
-    </Card>
-  );
 
   return (
     <div className="min-h-screen bg-background">
@@ -160,8 +98,8 @@ const Dashboard = () => {
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-4 py-6 space-y-8 animate-fade-in">
-        {/* No Teams Selected */}
+      <main className="max-w-4xl mx-auto px-4 py-6 space-y-6 animate-fade-in">
+        {/* No Teams Selected - Global */}
         {favoriteTeams.length === 0 && (
           <Card className="glass border-dashed border-2 border-primary/30">
             <CardContent className="p-8 text-center space-y-4">
@@ -182,89 +120,174 @@ const Dashboard = () => {
           </Card>
         )}
 
-        {/* Today's Games Section */}
+        {/* League Tabs */}
         {favoriteTeams.length > 0 && (
-          <section>
-            <div className="flex items-center gap-2 mb-4">
-              <CalendarDays className="h-5 w-5 text-primary" />
-              <h2 className="text-xl font-display font-bold text-foreground">오늘의 경기</h2>
-              <span className="text-sm text-muted-foreground">
-                {format(new Date(), 'M월 d일 (EEEE)', { locale: ko })}
-              </span>
-            </div>
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+            {LEAGUES.map((league) => {
+              const count = favoriteTeams.filter(t => t.league === league.id).length;
+              const isActive = LEAGUE_STATUS[league.id].active;
+              return (
+                <button
+                  key={league.id}
+                  onClick={() => setActiveLeague(league.id)}
+                  className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                    activeLeague === league.id
+                      ? `${getLeagueColor(league.id)} text-white`
+                      : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                  } ${!isActive ? 'opacity-70' : ''}`}
+                >
+                  {league.name}
+                  {!isActive && <span className="ml-1 text-xs">(준비중)</span>}
+                  {count > 0 && (
+                    <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${
+                      activeLeague === league.id 
+                        ? 'bg-white/20' 
+                        : 'bg-primary/20 text-primary'
+                    }`}>
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
-            {todayGames.length === 0 ? (
+        {/* Content based on league status */}
+        {favoriteTeams.length > 0 && (
+          <>
+            {!isLeagueActive ? (
+              // 준비중 리그
+              <Card className="glass border-border/50">
+                <CardContent className="p-8 flex flex-col items-center justify-center text-center">
+                  <div className={`w-16 h-16 rounded-2xl ${getLeagueColor(activeLeague)} flex items-center justify-center mb-4`}>
+                    <Construction className="h-8 w-8 text-white" />
+                  </div>
+                  <h2 className="text-lg font-display font-bold text-foreground mb-2">
+                    {activeLeague} 준비중
+                  </h2>
+                  <p className="text-muted-foreground text-sm">
+                    {LEAGUE_STATUS[activeLeague].message || '곧 서비스 예정입니다!'}
+                  </p>
+                </CardContent>
+              </Card>
+            ) : selectedTeamsCount === 0 ? (
+              // 해당 리그에 선택된 팀 없음
+              <Card className="glass border-border/50">
+                <CardContent className="p-8 text-center space-y-4">
+                  <Trophy className="h-12 w-12 mx-auto text-muted-foreground" />
+                  <p className="text-muted-foreground">
+                    {activeLeague} 팀을 선택해 주세요
+                  </p>
+                  <Button
+                    variant="outline"
+                    onClick={() => navigate('/teams')}
+                  >
+                    팀 선택하기
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : scheduleLoading ? (
+              // 로딩 중
+              <div className="flex items-center justify-center py-16">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : scheduleError ? (
+              // 에러
+              <Card className="glass border-destructive/30">
+                <CardContent className="p-8 text-center">
+                  <p className="text-destructive">{scheduleError}</p>
+                </CardContent>
+              </Card>
+            ) : groupedGames.length === 0 ? (
+              // 일정 없음
               <Card className="glass border-border/50">
                 <CardContent className="p-8 text-center">
-                  <p className="text-muted-foreground">오늘 예정된 경기가 없습니다</p>
+                  <CalendarDays className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                  <p className="text-muted-foreground">예정된 경기가 없습니다</p>
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2">
-                {todayGames.map((game) => (
-                  <GameCard key={game.id} game={game} />
-                ))}
-              </div>
-            )}
-          </section>
-        )}
+              // 일정 표시
+              <section className="space-y-6">
+                <div className="flex items-center gap-2">
+                  <CalendarDays className="h-5 w-5 text-primary" />
+                  <h2 className="text-xl font-display font-bold text-foreground">경기 일정</h2>
+                </div>
 
-        {/* This Week's Games Section */}
-        {favoriteTeams.length > 0 && weekGames.length > 0 && (
-          <section>
-            <div className="flex items-center gap-2 mb-4">
-              <CalendarDays className="h-5 w-5 text-accent" />
-              <h2 className="text-xl font-display font-bold text-foreground">이번 주 경기 일정</h2>
-            </div>
-
-            <div className="space-y-6">
-              {weekGames.map(({ date, games }) => (
-                <div key={date}>
-                  <div className="flex items-center gap-2 mb-3">
+                {groupedGames.map(({ date, games: dateGames }) => (
+                  <div key={date} className="space-y-3">
                     <Badge
                       variant={isToday(parseISO(date)) ? 'default' : 'secondary'}
                       className={isToday(parseISO(date)) ? 'gradient-primary' : ''}
                     >
-                      {isToday(parseISO(date))
-                        ? '오늘'
-                        : format(parseISO(date), 'M월 d일 (EEE)', { locale: ko })}
+                      {getDateLabel(date)}
                     </Badge>
+                    
+                    <div className="space-y-2">
+                      {dateGames.map((game) => (
+                        <Card key={game.id} className="glass border-border/50 hover:border-primary/30 transition-all">
+                          <CardContent className="p-4">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3 flex-1 min-w-0">
+                                {game.time && (
+                                  <div className="flex items-center gap-1 text-sm text-muted-foreground flex-shrink-0">
+                                    <Clock className="h-4 w-4" />
+                                    {game.time}
+                                  </div>
+                                )}
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-medium text-foreground truncate">
+                                    {game.away_team} @ {game.home_team}
+                                  </p>
+                                  {game.day && (
+                                    <p className="text-xs text-muted-foreground">{game.day}</p>
+                                  )}
+                                </div>
+                              </div>
+                              <Badge className={`${getLeagueColor(game.league)} text-primary-foreground text-xs flex-shrink-0 ml-2`}>
+                                {game.league}
+                              </Badge>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
                   </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    {games.map((game) => (
-                      <GameCard key={game.id} game={game} />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
+                ))}
+              </section>
+            )}
 
-        {/* Favorite Teams Chips */}
-        {favoriteTeams.length > 0 && (
-          <section className="pb-8">
-            <h3 className="text-sm font-medium text-muted-foreground mb-3">내가 선택한 팀</h3>
-            <div className="flex flex-wrap gap-2">
-              {favoriteTeams.map((team) => (
-                <Badge
-                  key={`${team.league}-${team.team_code}`}
-                  variant="secondary"
-                  className={`${getLeagueColor(team.league as League)} text-primary-foreground`}
-                >
-                  {team.team_code}
-                </Badge>
-              ))}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => navigate('/teams')}
-                className="text-xs text-muted-foreground hover:text-primary"
-              >
-                수정
-              </Button>
-            </div>
-          </section>
+            {/* Selected Teams for current league */}
+            {selectedTeamsCount > 0 && isLeagueActive && (
+              <section className="pb-8">
+                <h3 className="text-sm font-medium text-muted-foreground mb-3">
+                  선택한 {activeLeague} 팀
+                </h3>
+                <div className="flex flex-wrap gap-2">
+                  {favoriteTeams
+                    .filter(t => t.league === activeLeague)
+                    .map((team) => (
+                      <Badge
+                        key={`${team.league}-${team.team_code}`}
+                        variant="secondary"
+                        className={`${getLeagueColor(team.league as League)} text-primary-foreground`}
+                      >
+                        {team.team_code}
+                      </Badge>
+                    ))}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => navigate('/teams')}
+                    className="text-xs text-muted-foreground hover:text-primary"
+                  >
+                    수정
+                  </Button>
+                </div>
+              </section>
+            )}
+          </>
         )}
       </main>
     </div>
