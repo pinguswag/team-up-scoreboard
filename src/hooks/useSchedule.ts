@@ -12,11 +12,23 @@ export type ScheduleItem = {
 type ScheduleResponse = {
   league: string;
   date: string;
-  items: ScheduleItem[];
+  items: Array<{
+    league?: string;
+    time?: { timestamp?: number; timezone?: string };
+    teams?: {
+      home?: { id?: number; name?: string; code?: string };
+      away?: { id?: number; name?: string; code?: string };
+    };
+    fixture?: {
+      timestamp?: number;
+      date?: string;
+    };
+  }>;
 };
 
 type FavoriteTeam = {
   team_name: string;
+  team_code: string;
   league: string;
 };
 
@@ -30,6 +42,49 @@ type DebugLog = {
 
 const LEAGUES = ['NBA', 'EPL', 'NFL', 'MLB'] as const;
 const isDev = import.meta.env.DEV;
+
+// Convert UTC timestamp to KST formatted time string
+const formatKSTTime = (timestamp?: number, dateStr?: string): string | null => {
+  if (timestamp) {
+    // timestamp is in seconds, convert to milliseconds and add 9 hours for KST
+    const kstDate = new Date(timestamp * 1000);
+    const hours = kstDate.getUTCHours() + 9;
+    const adjustedHours = hours >= 24 ? hours - 24 : hours;
+    const minutes = kstDate.getUTCMinutes();
+    return `${String(adjustedHours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+  }
+  if (dateStr && dateStr.includes('T')) {
+    try {
+      const date = new Date(dateStr);
+      const hours = date.getUTCHours() + 9;
+      const adjustedHours = hours >= 24 ? hours - 24 : hours;
+      const minutes = date.getUTCMinutes();
+      return `${String(adjustedHours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
+// Normalize API response items to our ScheduleItem format
+const normalizeItem = (item: ScheduleResponse['items'][0], league: string): ScheduleItem => {
+  const timestamp = item.time?.timestamp || item.fixture?.timestamp;
+  const dateStr = item.fixture?.date;
+  
+  return {
+    league: item.league || league,
+    startTime: formatKSTTime(timestamp, dateStr),
+    home: {
+      code: item.teams?.home?.code || item.teams?.home?.id || null,
+      name: item.teams?.home?.name || null,
+    },
+    away: {
+      code: item.teams?.away?.code || item.teams?.away?.id || null,
+      name: item.teams?.away?.name || null,
+    },
+  };
+};
 
 export const useSchedule = (favoriteTeams: FavoriteTeam[]) => {
   const [todayGames, setTodayGames] = useState<ScheduleItem[]>([]);
@@ -71,7 +126,9 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[]) => {
         };
       }
 
-      const items = data?.items || [];
+      // Normalize items from API response
+      const rawItems = data?.items || [];
+      const items = rawItems.map(item => normalizeItem(item, league));
       
       // Store in cache
       cacheRef.current.set(cacheKey, items);
@@ -98,17 +155,29 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[]) => {
     if (favoriteTeams.length === 0) return [];
 
     return games.filter((game) => {
+      const homeCode = String(game.home.code || '').trim().toLowerCase();
+      const awayCode = String(game.away.code || '').trim().toLowerCase();
       const homeName = (game.home.name || '').trim().toLowerCase();
       const awayName = (game.away.name || '').trim().toLowerCase();
 
       return favoriteTeams.some((team) => {
+        if (game.league !== team.league) return false;
+        
+        const teamCode = team.team_code.trim().toLowerCase();
         const teamName = team.team_name.trim().toLowerCase();
+        
+        // Priority 1: Exact code match
+        if (homeCode === teamCode || awayCode === teamCode) return true;
+        
+        // Priority 2: Exact name match
+        if (homeName === teamName || awayName === teamName) return true;
+        
+        // Priority 3: Partial name match (contains)
         return (
-          (homeName.includes(teamName) || 
-           awayName.includes(teamName) ||
-           teamName.includes(homeName) ||
-           teamName.includes(awayName)) &&
-          game.league === team.league
+          homeName.includes(teamName) || 
+          awayName.includes(teamName) ||
+          teamName.includes(homeName) ||
+          teamName.includes(awayName)
         );
       });
     });
@@ -175,8 +244,12 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[]) => {
         const successCount = allLogs.filter(l => l.success).length;
         const failCount = allLogs.filter(l => !l.success).length;
         const totalItems = allLogs.reduce((sum, l) => sum + l.itemCount, 0);
+        const failedRequests = allLogs.filter(l => !l.success).map(l => `${l.league}/${l.date}`);
         console.log(`[Schedule Summary] Success: ${successCount}, Failed: ${failCount}, Total Items: ${totalItems}`);
         console.log(`[Filtered] Today: ${filteredTodayGames.length}, Week: ${weekData.reduce((sum, d) => sum + d.games.length, 0)}`);
+        if (failedRequests.length > 0) {
+          console.log(`[Failed Requests]`, failedRequests);
+        }
       }
 
     } catch (err) {
