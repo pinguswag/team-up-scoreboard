@@ -1,71 +1,23 @@
-import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/hooks/useAuth';
 import { useFavoriteTeams } from '@/hooks/useFavoriteTeams';
-import { DUMMY_GAMES, Game } from '@/data/games';
-import { getLeagueColor, getLeagueTextColor, League } from '@/data/teams';
-import { CalendarDays, Settings, LogOut, Loader2, Tv, Clock, Trophy } from 'lucide-react';
-import { format, isToday, addDays, isSameDay, parseISO } from 'date-fns';
+import { useSchedule, ScheduleItem } from '@/hooks/useSchedule';
+import { getLeagueColor, League } from '@/data/teams';
+import { CalendarDays, Settings, LogOut, Loader2, Clock, Trophy } from 'lucide-react';
+import { format, isToday, parseISO } from 'date-fns';
 import { ko } from 'date-fns/locale';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const { user, signOut, loading: authLoading } = useAuth();
   const { favoriteTeams, loading: teamsLoading } = useFavoriteTeams(user?.id);
+  const { todayGames, weekGames, loading: scheduleLoading } = useSchedule(favoriteTeams);
 
   const loading = authLoading || teamsLoading;
-
-  // Filter games for favorite teams
-  const myGames = useMemo(() => {
-    const favoriteTeamCodes = favoriteTeams.map((t) => ({
-      code: t.team_code,
-      league: t.league,
-    }));
-
-    return DUMMY_GAMES.filter((game) =>
-      favoriteTeamCodes.some(
-        (team) =>
-          (game.homeTeamCode === team.code || game.awayTeamCode === team.code) &&
-          game.league === team.league
-      )
-    );
-  }, [favoriteTeams]);
-
-  // Today's games
-  const todayGames = useMemo(() => {
-    const today = new Date();
-    return myGames.filter((game) => isToday(parseISO(game.date)));
-  }, [myGames]);
-
-  // This week's games (grouped by date)
-  const weekGames = useMemo(() => {
-    const today = new Date();
-    const weekEnd = addDays(today, 7);
-    
-    const games = myGames.filter((game) => {
-      const gameDate = parseISO(game.date);
-      return gameDate >= today && gameDate <= weekEnd;
-    });
-
-    // Group by date
-    const grouped: Record<string, Game[]> = {};
-    games.forEach((game) => {
-      if (!grouped[game.date]) {
-        grouped[game.date] = [];
-      }
-      grouped[game.date].push(game);
-    });
-
-    return Object.entries(grouped)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, games]) => ({
-        date,
-        games: games.sort((a, b) => a.time.localeCompare(b.time)),
-      }));
-  }, [myGames]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -85,45 +37,66 @@ const Dashboard = () => {
     return null;
   }
 
-  const getBroadcastStyle = (broadcast: string) => {
-    if (broadcast === '쿠팡플레이') return 'bg-[hsl(350,80%,50%)] text-primary-foreground';
-    if (broadcast === 'SPOTV') return 'bg-[hsl(200,90%,45%)] text-primary-foreground';
-    return 'bg-muted text-muted-foreground';
+  const GameCard = ({ game }: { game: ScheduleItem }) => {
+    const timeStr = game.startTime.includes('T') 
+      ? format(parseISO(game.startTime), 'HH:mm')
+      : game.startTime;
+
+    return (
+      <Card className="glass border-border/50 hover:border-primary/30 transition-all">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <Badge className={`${getLeagueColor(game.league as League)} text-primary-foreground text-xs`}>
+              {game.league}
+            </Badge>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Clock className="h-4 w-4" />
+              {timeStr}
+            </div>
+          </div>
+          
+          <div className="flex items-center justify-between">
+            <div className="flex-1 text-center">
+              <p className="font-display font-bold text-lg text-foreground">{game.home.code}</p>
+              <p className="text-xs text-muted-foreground truncate">{game.home.name}</p>
+            </div>
+            <div className="px-4">
+              <span className="text-xl font-bold text-muted-foreground">VS</span>
+            </div>
+            <div className="flex-1 text-center">
+              <p className="font-display font-bold text-lg text-foreground">{game.away.code}</p>
+              <p className="text-xs text-muted-foreground truncate">{game.away.name}</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
   };
 
-  const GameCard = ({ game }: { game: Game }) => (
-    <Card className="glass border-border/50 hover:border-primary/30 transition-all">
-      <CardContent className="p-4">
-        <div className="flex items-center justify-between mb-3">
-          <Badge className={`${getLeagueColor(game.league)} text-primary-foreground text-xs`}>
-            {game.league}
-          </Badge>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Clock className="h-4 w-4" />
-            {game.time}
-          </div>
-        </div>
-        
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex-1 text-center">
-            <p className="font-display font-bold text-lg text-foreground">{game.homeTeamCode}</p>
-            <p className="text-xs text-muted-foreground truncate">{game.homeTeam}</p>
-          </div>
-          <div className="px-4">
-            <span className="text-xl font-bold text-muted-foreground">VS</span>
-          </div>
-          <div className="flex-1 text-center">
-            <p className="font-display font-bold text-lg text-foreground">{game.awayTeamCode}</p>
-            <p className="text-xs text-muted-foreground truncate">{game.awayTeam}</p>
-          </div>
-        </div>
+  const LoadingSkeleton = () => (
+    <div className="grid gap-4 sm:grid-cols-2">
+      {[1, 2, 3, 4].map((i) => (
+        <Card key={i} className="glass border-border/50">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex justify-between">
+              <Skeleton className="h-5 w-12" />
+              <Skeleton className="h-5 w-16" />
+            </div>
+            <div className="flex justify-between items-center">
+              <Skeleton className="h-10 w-20" />
+              <Skeleton className="h-6 w-8" />
+              <Skeleton className="h-10 w-20" />
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
 
-        <div className="flex items-center justify-center">
-          <Badge variant="secondary" className={`${getBroadcastStyle(game.broadcast)}`}>
-            <Tv className="h-3 w-3 mr-1" />
-            {game.broadcast}
-          </Badge>
-        </div>
+  const EmptyState = () => (
+    <Card className="glass border-border/50">
+      <CardContent className="p-8 text-center">
+        <p className="text-muted-foreground">선택한 팀의 경기 일정이 없습니다</p>
       </CardContent>
     </Card>
   );
@@ -193,16 +166,14 @@ const Dashboard = () => {
               </span>
             </div>
 
-            {todayGames.length === 0 ? (
-              <Card className="glass border-border/50">
-                <CardContent className="p-8 text-center">
-                  <p className="text-muted-foreground">오늘 예정된 경기가 없습니다</p>
-                </CardContent>
-              </Card>
+            {scheduleLoading ? (
+              <LoadingSkeleton />
+            ) : todayGames.length === 0 ? (
+              <EmptyState />
             ) : (
               <div className="grid gap-4 sm:grid-cols-2">
-                {todayGames.map((game) => (
-                  <GameCard key={game.id} game={game} />
+                {todayGames.map((game, index) => (
+                  <GameCard key={`today-${game.league}-${game.home.code}-${game.away.code}-${index}`} game={game} />
                 ))}
               </div>
             )}
@@ -210,34 +181,40 @@ const Dashboard = () => {
         )}
 
         {/* This Week's Games Section */}
-        {favoriteTeams.length > 0 && weekGames.length > 0 && (
+        {favoriteTeams.length > 0 && (
           <section>
             <div className="flex items-center gap-2 mb-4">
               <CalendarDays className="h-5 w-5 text-accent" />
               <h2 className="text-xl font-display font-bold text-foreground">이번 주 경기 일정</h2>
             </div>
 
-            <div className="space-y-6">
-              {weekGames.map(({ date, games }) => (
-                <div key={date}>
-                  <div className="flex items-center gap-2 mb-3">
-                    <Badge
-                      variant={isToday(parseISO(date)) ? 'default' : 'secondary'}
-                      className={isToday(parseISO(date)) ? 'gradient-primary' : ''}
-                    >
-                      {isToday(parseISO(date))
-                        ? '오늘'
-                        : format(parseISO(date), 'M월 d일 (EEE)', { locale: ko })}
-                    </Badge>
+            {scheduleLoading ? (
+              <LoadingSkeleton />
+            ) : weekGames.length === 0 ? (
+              <EmptyState />
+            ) : (
+              <div className="space-y-6">
+                {weekGames.map(({ date, games }) => (
+                  <div key={date}>
+                    <div className="flex items-center gap-2 mb-3">
+                      <Badge
+                        variant={isToday(parseISO(date)) ? 'default' : 'secondary'}
+                        className={isToday(parseISO(date)) ? 'gradient-primary' : ''}
+                      >
+                        {isToday(parseISO(date))
+                          ? '오늘'
+                          : format(parseISO(date), 'M월 d일 (EEE)', { locale: ko })}
+                      </Badge>
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {games.map((game, index) => (
+                        <GameCard key={`week-${date}-${game.league}-${game.home.code}-${game.away.code}-${index}`} game={game} />
+                      ))}
+                    </div>
                   </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    {games.map((game) => (
-                      <GameCard key={game.id} game={game} />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </section>
         )}
 
