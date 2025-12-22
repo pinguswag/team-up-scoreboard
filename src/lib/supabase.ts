@@ -1,11 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables');
-}
+// Publishable keys - safe to expose in client-side code
+const supabaseUrl = 'https://kqjrrmmbsdfzppodxcsf.supabase.co';
+const supabaseAnonKey = 'sb_publishable_6IKoyK548QZDpNNABsgmQA_ACX4rXT0';
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
