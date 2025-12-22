@@ -1,12 +1,11 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 import { LEAGUES, TEAMS, League, getLeagueColor } from '@/data/teams';
 import { useFavoriteTeams } from '@/hooks/useFavoriteTeams';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
-import { Check, Loader2, ChevronRight } from 'lucide-react';
+import { Check, Loader2, Search, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const TeamSelection = () => {
@@ -14,7 +13,21 @@ const TeamSelection = () => {
   const { user } = useAuth();
   const { favoriteTeams, isTeamFavorite, toggleFavoriteTeam, loading } = useFavoriteTeams(user?.id);
   const [saving, setSaving] = useState<string | null>(null);
-  const [expandedLeague, setExpandedLeague] = useState<League | null>('NBA');
+  const [activeLeague, setActiveLeague] = useState<League>('NBA');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // 검색 필터링된 팀 리스트
+  const filteredTeams = useMemo(() => {
+    const teams = TEAMS[activeLeague];
+    if (!searchQuery.trim()) return teams;
+    
+    const query = searchQuery.toLowerCase();
+    return teams.filter(
+      team => 
+        team.name.toLowerCase().includes(query) || 
+        team.code.toLowerCase().includes(query)
+    );
+  }, [activeLeague, searchQuery]);
 
   const handleToggleTeam = async (league: League, teamCode: string, teamName: string) => {
     setSaving(`${league}-${teamCode}`);
@@ -42,121 +55,157 @@ const TeamSelection = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background p-4 pb-24">
-      <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
-        {/* Header */}
-        <div className="text-center space-y-2 py-6">
-          <h1 className="text-3xl font-display font-bold text-foreground">
-            좋아하는 팀 선택
-          </h1>
-          <p className="text-muted-foreground">
-            경기 일정을 확인할 팀을 선택하세요 (복수 선택 가능)
-          </p>
+    <div className="min-h-screen bg-background flex flex-col">
+      {/* Header */}
+      <div className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border">
+        <div className="px-4 py-4 space-y-4">
+          <div className="text-center">
+            <h1 className="text-2xl font-display font-bold text-foreground">
+              좋아하는 팀 선택
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              경기 일정을 확인할 팀을 선택하세요
+            </p>
+          </div>
+
+          {/* League Tabs */}
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+            {LEAGUES.map((league) => {
+              const count = favoriteTeams.filter(t => t.league === league.id).length;
+              return (
+                <button
+                  key={league.id}
+                  onClick={() => {
+                    setActiveLeague(league.id);
+                    setSearchQuery('');
+                  }}
+                  className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                    activeLeague === league.id
+                      ? `${getLeagueColor(league.id)} text-white`
+                      : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                  }`}
+                >
+                  {league.name}
+                  {count > 0 && (
+                    <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${
+                      activeLeague === league.id 
+                        ? 'bg-white/20' 
+                        : 'bg-primary/20 text-primary'
+                    }`}>
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Search Input */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              type="text"
+              placeholder="팀 이름으로 검색..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10 bg-muted/50 border-border"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Selected Teams Count */}
+        {/* Selected Teams Chips */}
         {favoriteTeams.length > 0 && (
-          <div className="glass rounded-xl p-4 flex items-center justify-between">
-            <span className="text-foreground font-medium">
-              선택된 팀: <span className="text-primary">{favoriteTeams.length}개</span>
-            </span>
-            <div className="flex flex-wrap gap-2">
-              {favoriteTeams.slice(0, 3).map((team) => (
-                <span
+          <div className="px-4 pb-3">
+            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+              {favoriteTeams.map((team) => (
+                <button
                   key={`${team.league}-${team.team_code}`}
-                  className={`text-xs px-2 py-1 rounded-full text-primary-foreground ${getLeagueColor(team.league as League)}`}
+                  onClick={() => handleToggleTeam(team.league as League, team.team_code, team.team_name)}
+                  disabled={!!saving}
+                  className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium text-white ${getLeagueColor(team.league as League)} hover:opacity-90 transition-opacity`}
                 >
-                  {team.team_code}
-                </span>
+                  <span className="max-w-[100px] truncate">{team.team_name}</span>
+                  <X className="h-3.5 w-3.5" />
+                </button>
               ))}
-              {favoriteTeams.length > 3 && (
-                <span className="text-xs px-2 py-1 rounded-full bg-muted text-muted-foreground">
-                  +{favoriteTeams.length - 3}
-                </span>
-              )}
             </div>
           </div>
         )}
+      </div>
 
-        {/* League Sections */}
-        <div className="space-y-3">
-          {LEAGUES.map((league) => (
-            <Card
-              key={league.id}
-              className="glass border-border/50 overflow-hidden"
-            >
-              <CardHeader
-                className={`cursor-pointer transition-colors hover:bg-muted/50 ${
-                  expandedLeague === league.id ? 'border-b border-border' : ''
-                }`}
-                onClick={() => setExpandedLeague(expandedLeague === league.id ? null : league.id)}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-3 h-3 rounded-full ${getLeagueColor(league.id)}`} />
-                    <CardTitle className="text-lg font-display">{league.name}</CardTitle>
-                    <span className="text-sm text-muted-foreground">
-                      ({favoriteTeams.filter(t => t.league === league.id).length} 선택)
+      {/* Team List */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 pb-24">
+        <div className="space-y-2">
+          {filteredTeams.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              검색 결과가 없습니다
+            </div>
+          ) : (
+            filteredTeams.map((team) => {
+              const isFavorite = isTeamFavorite(team.code, activeLeague);
+              const isSaving = saving === `${activeLeague}-${team.code}`;
+
+              return (
+                <button
+                  key={team.code}
+                  onClick={() => handleToggleTeam(activeLeague, team.code, team.name)}
+                  disabled={!!saving}
+                  className={`w-full flex items-center justify-between p-4 rounded-xl transition-all ${
+                    isFavorite
+                      ? 'bg-primary/10 border-2 border-primary'
+                      : 'bg-muted/50 border-2 border-transparent hover:bg-muted'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold ${
+                      isFavorite 
+                        ? `${getLeagueColor(activeLeague)} text-white` 
+                        : 'bg-muted text-muted-foreground'
+                    }`}>
+                      {team.code}
+                    </div>
+                    <span className={`font-medium truncate ${
+                      isFavorite ? 'text-foreground' : 'text-foreground/80'
+                    }`}>
+                      {team.name}
                     </span>
                   </div>
-                  <ChevronRight
-                    className={`h-5 w-5 text-muted-foreground transition-transform ${
-                      expandedLeague === league.id ? 'rotate-90' : ''
-                    }`}
-                  />
-                </div>
-              </CardHeader>
-              {expandedLeague === league.id && (
-                <CardContent className="p-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {TEAMS[league.id].map((team) => {
-                    const isFavorite = isTeamFavorite(team.code, league.id);
-                    const isSaving = saving === `${league.id}-${team.code}`;
-                    
-                    return (
-                      <button
-                        key={team.code}
-                        onClick={() => handleToggleTeam(league.id, team.code, team.name)}
-                        disabled={!!saving}
-                        className={`relative flex items-center gap-3 p-3 rounded-lg border-2 transition-all ${
-                          isFavorite
-                            ? 'border-primary bg-primary/10'
-                            : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                        }`}
-                      >
-                        <Checkbox
-                          checked={isFavorite}
-                          className="pointer-events-none"
-                        />
-                        <div className="flex-1 text-left">
-                          <p className="font-medium text-foreground text-sm truncate">
-                            {team.name}
-                          </p>
-                          <p className="text-xs text-muted-foreground">{team.code}</p>
-                        </div>
-                        {isSaving && (
-                          <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-primary" />
-                        )}
-                      </button>
-                    );
-                  })}
-                </CardContent>
-              )}
-            </Card>
-          ))}
+                  
+                  <div className="flex-shrink-0 ml-2">
+                    {isSaving ? (
+                      <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                    ) : isFavorite ? (
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center ${getLeagueColor(activeLeague)}`}>
+                        <Check className="h-4 w-4 text-white" />
+                      </div>
+                    ) : (
+                      <div className="w-6 h-6 rounded-full border-2 border-muted-foreground/30" />
+                    )}
+                  </div>
+                </button>
+              );
+            })
+          )}
         </div>
       </div>
 
       {/* Fixed Bottom Button */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-background/80 backdrop-blur-xl border-t border-border">
-        <div className="max-w-2xl mx-auto">
-          <Button
-            onClick={handleContinue}
-            className="w-full h-14 text-lg font-medium gradient-primary hover:opacity-90"
-          >
-            <Check className="mr-2 h-5 w-5" />
-            완료 ({favoriteTeams.length}팀 선택됨)
-          </Button>
-        </div>
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-background/95 backdrop-blur-sm border-t border-border">
+        <Button
+          onClick={handleContinue}
+          className="w-full h-14 text-lg font-medium gradient-primary hover:opacity-90"
+        >
+          <Check className="mr-2 h-5 w-5" />
+          완료 ({favoriteTeams.length}팀 선택됨)
+        </Button>
       </div>
     </div>
   );
