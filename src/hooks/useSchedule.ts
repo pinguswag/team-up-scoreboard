@@ -7,29 +7,30 @@ export type ScheduleItem = {
   startTime: string | null;
   home: { code: string | number | null; name: string | null };
   away: { code: string | number | null; name: string | null };
+  // Raw data for debugging
+  _raw?: unknown;
 };
 
 type ScheduleResponse = {
   league: string;
   date: string;
-  items: Array<{
-    league?: string;
-    time?: { timestamp?: number; timezone?: string };
-    teams?: {
-      home?: { id?: number; name?: string; code?: string };
-      away?: { id?: number; name?: string; code?: string };
-    };
-    fixture?: {
-      timestamp?: number;
-      date?: string;
-    };
-  }>;
+  items: unknown[];
 };
 
 type FavoriteTeam = {
   team_name: string;
   team_code: string;
   league: string;
+};
+
+export type DebugInfo = {
+  lastCallLeague: string;
+  lastCallDate: string;
+  lastCallSuccess: boolean;
+  lastCallError: string | null;
+  lastCallItemsCount: number;
+  lastCallFirstItem: string | null;
+  rawItems: unknown[];
 };
 
 type DebugLog = {
@@ -43,10 +44,12 @@ type DebugLog = {
 const LEAGUES = ['NBA', 'EPL', 'NFL', 'MLB'] as const;
 const isDev = import.meta.env.DEV;
 
+// DEBUG: Temporarily disable filtering
+const DEBUG_DISABLE_FILTER = true;
+
 // Convert UTC timestamp to KST formatted time string
 const formatKSTTime = (timestamp?: number, dateStr?: string): string | null => {
   if (timestamp) {
-    // timestamp is in seconds, convert to milliseconds and add 9 hours for KST
     const kstDate = new Date(timestamp * 1000);
     const hours = kstDate.getUTCHours() + 9;
     const adjustedHours = hours >= 24 ? hours - 24 : hours;
@@ -67,22 +70,30 @@ const formatKSTTime = (timestamp?: number, dateStr?: string): string | null => {
   return null;
 };
 
-// Normalize API response items to our ScheduleItem format
-const normalizeItem = (item: ScheduleResponse['items'][0], league: string): ScheduleItem => {
-  const timestamp = item.time?.timestamp || item.fixture?.timestamp;
-  const dateStr = item.fixture?.date;
+// Normalize API response items - handles various API structures
+const normalizeItem = (item: unknown, league: string): ScheduleItem => {
+  const raw = item as Record<string, unknown>;
+  
+  // Try different API response structures
+  const time = raw.time as Record<string, unknown> | undefined;
+  const fixture = raw.fixture as Record<string, unknown> | undefined;
+  const teams = raw.teams as Record<string, Record<string, unknown>> | undefined;
+  
+  const timestamp = (time?.timestamp || fixture?.timestamp) as number | undefined;
+  const dateStr = (fixture?.date || raw.date) as string | undefined;
   
   return {
-    league: item.league || league,
+    league: (raw.league as string) || league,
     startTime: formatKSTTime(timestamp, dateStr),
     home: {
-      code: item.teams?.home?.code || item.teams?.home?.id || null,
-      name: item.teams?.home?.name || null,
+      code: (teams?.home?.code as string | number) || (teams?.home?.id as string | number) || null,
+      name: (teams?.home?.name as string) || null,
     },
     away: {
-      code: item.teams?.away?.code || item.teams?.away?.id || null,
-      name: item.teams?.away?.name || null,
+      code: (teams?.away?.code as string | number) || (teams?.away?.id as string | number) || null,
+      name: (teams?.away?.name as string) || null,
     },
+    _raw: raw, // Keep raw for debugging
   };
 };
 
@@ -92,66 +103,104 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[]) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [debugLogs, setDebugLogs] = useState<DebugLog[]>([]);
+  const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(null);
   
-  // Memory cache to prevent duplicate calls within component lifecycle
   const cacheRef = useRef<Map<string, ScheduleItem[]>>(new Map());
 
   const getCacheKey = (league: string, date: string) => `${league}-${date}`;
 
-  const fetchScheduleForDate = async (league: string, date: string): Promise<{ items: ScheduleItem[]; log: DebugLog }> => {
+  const fetchScheduleForDate = async (league: string, date: string): Promise<{ items: ScheduleItem[]; log: DebugLog; rawItems: unknown[] }> => {
     const cacheKey = getCacheKey(league, date);
     
-    // Check cache first
     if (cacheRef.current.has(cacheKey)) {
       const cachedItems = cacheRef.current.get(cacheKey)!;
-      if (isDev) {
-        console.log(`[Cache Hit] ${league} ${date}: ${cachedItems.length} items`);
-      }
+      console.log(`[Cache Hit] ${league} ${date}: ${cachedItems.length} items`);
       return {
         items: cachedItems,
-        log: { league, date, success: true, itemCount: cachedItems.length }
+        log: { league, date, success: true, itemCount: cachedItems.length },
+        rawItems: cachedItems.map(i => i._raw)
       };
     }
 
     try {
+      console.log(`[Calling] rapid-endpoint with league=${league}, date=${date}`);
+      
       const { data, error } = await supabase.functions.invoke<ScheduleResponse>('rapid-endpoint', {
         body: { league, date },
       });
 
+      // DEBUG: Log full response
+      console.log(`[Response] ${league} ${date}:`, { data, error });
+
       if (error) {
         console.error(`[Error] ${league} ${date}:`, error);
+        setDebugInfo({
+          lastCallLeague: league,
+          lastCallDate: date,
+          lastCallSuccess: false,
+          lastCallError: error.message,
+          lastCallItemsCount: 0,
+          lastCallFirstItem: null,
+          rawItems: []
+        });
         return {
           items: [],
-          log: { league, date, success: false, itemCount: 0, error: error.message }
+          log: { league, date, success: false, itemCount: 0, error: error.message },
+          rawItems: []
         };
       }
 
-      // Normalize items from API response
       const rawItems = data?.items || [];
       const items = rawItems.map(item => normalizeItem(item, league));
       
-      // Store in cache
+      // DEBUG: Update debug info
+      setDebugInfo({
+        lastCallLeague: league,
+        lastCallDate: date,
+        lastCallSuccess: true,
+        lastCallError: null,
+        lastCallItemsCount: rawItems.length,
+        lastCallFirstItem: rawItems.length > 0 ? JSON.stringify(rawItems[0]).slice(0, 500) : null,
+        rawItems: rawItems
+      });
+      
       cacheRef.current.set(cacheKey, items);
       
-      if (isDev) {
-        console.log(`[Fetched] ${league} ${date}: ${items.length} items`);
-      }
+      console.log(`[Fetched] ${league} ${date}: ${items.length} items`);
+      console.log(`[First Item]`, rawItems[0]);
 
       return {
         items,
-        log: { league, date, success: true, itemCount: items.length }
+        log: { league, date, success: true, itemCount: items.length },
+        rawItems
       };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       console.error(`[Failed] ${league} ${date}:`, err);
+      setDebugInfo({
+        lastCallLeague: league,
+        lastCallDate: date,
+        lastCallSuccess: false,
+        lastCallError: errorMessage,
+        lastCallItemsCount: 0,
+        lastCallFirstItem: null,
+        rawItems: []
+      });
       return {
         items: [],
-        log: { league, date, success: false, itemCount: 0, error: errorMessage }
+        log: { league, date, success: false, itemCount: 0, error: errorMessage },
+        rawItems: []
       };
     }
   };
 
   const filterByFavoriteTeams = useCallback((games: ScheduleItem[]): ScheduleItem[] => {
+    // DEBUG: Skip filtering when debug mode is on
+    if (DEBUG_DISABLE_FILTER) {
+      console.log(`[Filter] DISABLED - returning all ${games.length} games`);
+      return games;
+    }
+    
     if (favoriteTeams.length === 0) return [];
 
     return games.filter((game) => {
@@ -166,13 +215,9 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[]) => {
         const teamCode = team.team_code.trim().toLowerCase();
         const teamName = team.team_name.trim().toLowerCase();
         
-        // Priority 1: Exact code match
         if (homeCode === teamCode || awayCode === teamCode) return true;
-        
-        // Priority 2: Exact name match
         if (homeName === teamName || awayName === teamName) return true;
         
-        // Priority 3: Partial name match (contains)
         return (
           homeName.includes(teamName) || 
           awayName.includes(teamName) ||
@@ -184,12 +229,13 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[]) => {
   }, [favoriteTeams]);
 
   const fetchSchedules = useCallback(async () => {
-    if (favoriteTeams.length === 0) {
-      setTodayGames([]);
-      setWeekGames([]);
-      setLoading(false);
-      return;
-    }
+    // DEBUG: Fetch even without favorite teams
+    // if (favoriteTeams.length === 0) {
+    //   setTodayGames([]);
+    //   setWeekGames([]);
+    //   setLoading(false);
+    //   return;
+    // }
 
     setLoading(true);
     setError(null);
@@ -198,6 +244,8 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[]) => {
     try {
       const today = new Date();
       const todayStr = format(today, 'yyyy-MM-dd');
+      
+      console.log(`[Schedule] Fetching for today: ${todayStr}`);
 
       // Fetch today's games for all leagues
       const todayResults = await Promise.all(
@@ -207,7 +255,11 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[]) => {
       const allTodayGames = todayResults.flatMap(r => r.items);
       todayResults.forEach(r => allLogs.push(r.log));
       
+      console.log(`[Schedule] Total today games before filter: ${allTodayGames.length}`);
+      
       const filteredTodayGames = filterByFavoriteTeams(allTodayGames);
+      console.log(`[Schedule] Today games after filter: ${filteredTodayGames.length}`);
+      
       setTodayGames(filteredTodayGames);
 
       // Fetch this week's games (7 days)
@@ -240,16 +292,14 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[]) => {
       setDebugLogs(allLogs);
 
       // Debug summary
-      if (isDev) {
-        const successCount = allLogs.filter(l => l.success).length;
-        const failCount = allLogs.filter(l => !l.success).length;
-        const totalItems = allLogs.reduce((sum, l) => sum + l.itemCount, 0);
-        const failedRequests = allLogs.filter(l => !l.success).map(l => `${l.league}/${l.date}`);
-        console.log(`[Schedule Summary] Success: ${successCount}, Failed: ${failCount}, Total Items: ${totalItems}`);
-        console.log(`[Filtered] Today: ${filteredTodayGames.length}, Week: ${weekData.reduce((sum, d) => sum + d.games.length, 0)}`);
-        if (failedRequests.length > 0) {
-          console.log(`[Failed Requests]`, failedRequests);
-        }
+      const successCount = allLogs.filter(l => l.success).length;
+      const failCount = allLogs.filter(l => !l.success).length;
+      const totalItems = allLogs.reduce((sum, l) => sum + l.itemCount, 0);
+      const failedRequests = allLogs.filter(l => !l.success).map(l => `${l.league}/${l.date}: ${l.error}`);
+      console.log(`[Schedule Summary] Success: ${successCount}, Failed: ${failCount}, Total Items: ${totalItems}`);
+      console.log(`[Filtered] Today: ${filteredTodayGames.length}, Week: ${weekData.reduce((sum, d) => sum + d.games.length, 0)}`);
+      if (failedRequests.length > 0) {
+        console.log(`[Failed Requests]`, failedRequests);
       }
 
     } catch (err) {
@@ -264,7 +314,6 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[]) => {
     fetchSchedules();
   }, [fetchSchedules]);
 
-  // Clear cache on unmount
   useEffect(() => {
     return () => {
       cacheRef.current.clear();
@@ -277,6 +326,7 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[]) => {
     loading,
     error,
     debugLogs,
+    debugInfo,
     refetch: fetchSchedules,
   };
 };
