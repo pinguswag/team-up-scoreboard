@@ -6,7 +6,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useFavoriteTeams } from '@/hooks/useFavoriteTeams';
 import { useSchedule, ScheduleItem } from '@/hooks/useSchedule';
 import { getLeagueColor, League } from '@/data/teams';
-import { CalendarDays, Settings, LogOut, Loader2, Clock, Trophy, AlertCircle, Bug } from 'lucide-react';
+import { CalendarDays, Settings, LogOut, Loader2, Clock, Trophy, AlertCircle } from 'lucide-react';
 import { format, isToday, parseISO } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -17,7 +17,7 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const { user, signOut, loading: authLoading } = useAuth();
   const { favoriteTeams, loading: teamsLoading } = useFavoriteTeams(user?.id);
-  const { todayGames, weekGames, loading: scheduleLoading, error, debugInfo, debugLogs } = useSchedule(favoriteTeams);
+  const { todayGames, weekGames, loading: scheduleLoading, error, debugInfo, debugLogs, demoMode, demoDate } = useSchedule(favoriteTeams);
 
   const loading = authLoading || teamsLoading;
 
@@ -39,34 +39,13 @@ const Dashboard = () => {
     return null;
   }
 
-  // DEBUG: Raw game card showing all available data
-  const DebugGameCard = ({ game, index }: { game: ScheduleItem; index: number }) => {
-    const raw = game._raw as Record<string, unknown> | undefined;
-    
-    return (
-      <Card className="glass border-yellow-500/50 text-xs">
-        <CardContent className="p-3 space-y-2">
-          <div className="flex justify-between">
-            <Badge className="bg-yellow-500 text-black text-[10px]">#{index + 1} {game.league}</Badge>
-            <span className="text-muted-foreground">{game.startTime || 'No Time'}</span>
-          </div>
-          <div className="text-foreground">
-            <strong>Home:</strong> {game.home.code} / {game.home.name}
-          </div>
-          <div className="text-foreground">
-            <strong>Away:</strong> {game.away.code} / {game.away.name}
-          </div>
-          {raw && (
-            <details className="text-[10px] text-muted-foreground">
-              <summary className="cursor-pointer">Raw Data</summary>
-              <pre className="mt-1 p-1 bg-muted/50 rounded overflow-auto max-h-32">
-                {JSON.stringify(raw, null, 2)}
-              </pre>
-            </details>
-          )}
-        </CardContent>
-      </Card>
-    );
+  // Format demo date for display
+  const getDemoDateDisplay = (dateStr: string) => {
+    try {
+      return format(parseISO(dateStr), 'M월 d일 (EEE)', { locale: ko });
+    } catch {
+      return dateStr;
+    }
   };
 
   const GameCard = ({ game }: { game: ScheduleItem }) => {
@@ -155,86 +134,14 @@ const Dashboard = () => {
     </Card>
   );
 
-  // Calculate debug stats
-  const successCalls = debugLogs.filter(l => l.success).length;
-  const failedCalls = debugLogs.filter(l => !l.success).length;
-  const totalItems = debugLogs.reduce((sum, l) => sum + l.itemCount, 0);
-
   return (
     <div className="min-h-screen bg-background">
-      {/* DEBUG Panel - Development Only */}
-      {isDev && (
-        <div className="bg-yellow-500/10 border-b-2 border-yellow-500 p-3 text-xs font-mono">
-          <div className="max-w-4xl mx-auto space-y-2">
-            <div className="flex items-center gap-2 text-yellow-600 font-bold">
-              <Bug className="h-4 w-4" />
-              DEBUG PANEL (Dev Only)
-            </div>
-            
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-foreground">
-              <div className="bg-background/50 p-2 rounded">
-                <div className="text-muted-foreground">User ID</div>
-                <div className="truncate">{user?.id ? `✅ ${user.id.slice(0, 8)}...` : '❌ None'}</div>
-              </div>
-              <div className="bg-background/50 p-2 rounded">
-                <div className="text-muted-foreground">Favorite Teams</div>
-                <div>{favoriteTeams.length}개</div>
-              </div>
-              <div className="bg-background/50 p-2 rounded">
-                <div className="text-muted-foreground">Today</div>
-                <div>{format(new Date(), 'yyyy-MM-dd')}</div>
-              </div>
-              <div className="bg-background/50 p-2 rounded">
-                <div className="text-muted-foreground">Loading</div>
-                <div>{scheduleLoading ? '⏳ Yes' : '✅ Done'}</div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-foreground">
-              <div className="bg-background/50 p-2 rounded">
-                <div className="text-muted-foreground">API Calls</div>
-                <div>✅{successCalls} / ❌{failedCalls}</div>
-              </div>
-              <div className="bg-background/50 p-2 rounded">
-                <div className="text-muted-foreground">Total Items</div>
-                <div>{totalItems}</div>
-              </div>
-              <div className="bg-background/50 p-2 rounded">
-                <div className="text-muted-foreground">Today Games</div>
-                <div>{todayGames.length}</div>
-              </div>
-              <div className="bg-background/50 p-2 rounded">
-                <div className="text-muted-foreground">Week Days</div>
-                <div>{weekGames.length}</div>
-              </div>
-            </div>
-
-            {debugInfo && (
-              <div className="bg-background/50 p-2 rounded space-y-1">
-                <div className="text-muted-foreground">Last Call: {debugInfo.lastCallLeague} / {debugInfo.lastCallDate}</div>
-                <div>Status: {debugInfo.lastCallSuccess ? '✅ Success' : '❌ Failed'}</div>
-                {debugInfo.lastCallError && <div className="text-red-500">Error: {debugInfo.lastCallError}</div>}
-                <div>Items Count: {debugInfo.lastCallItemsCount}</div>
-                {debugInfo.lastCallFirstItem && (
-                  <details>
-                    <summary className="cursor-pointer text-yellow-600">First Item (click to expand)</summary>
-                    <pre className="mt-1 p-1 bg-muted rounded overflow-auto max-h-40 text-[10px]">
-                      {debugInfo.lastCallFirstItem}
-                    </pre>
-                  </details>
-                )}
-              </div>
-            )}
-
-            {debugLogs.filter(l => !l.success).length > 0 && (
-              <div className="bg-red-500/10 p-2 rounded">
-                <div className="text-red-500 font-bold">Failed Requests:</div>
-                {debugLogs.filter(l => !l.success).map((l, i) => (
-                  <div key={i} className="text-red-400">{l.league}/{l.date}: {l.error}</div>
-                ))}
-              </div>
-            )}
-          </div>
+      {/* Demo Mode Banner */}
+      {demoMode && (
+        <div className="bg-amber-500/20 border-b border-amber-500/50 py-2 px-4">
+          <p className="text-center text-sm text-amber-700 dark:text-amber-300 font-medium">
+            ※ 본 일정 자료는 2022년 데이터입니다.
+          </p>
         </div>
       )}
 
@@ -295,15 +202,14 @@ const Dashboard = () => {
         {/* Error State */}
         {error && <ErrorState />}
 
-        {/* Today's Games Section - DEBUG MODE: Show all games */}
+        {/* Today's Games Section */}
         <section>
           <div className="flex items-center gap-2 mb-3">
             <CalendarDays className="h-5 w-5 text-primary" />
             <h2 className="text-lg font-display font-bold text-foreground">오늘의 경기</h2>
             <span className="text-xs text-muted-foreground ml-auto">
-              {format(new Date(), 'M월 d일 (EEE)', { locale: ko })}
+              {demoMode ? getDemoDateDisplay(demoDate) : format(new Date(), 'M월 d일 (EEE)', { locale: ko })}
             </span>
-            {isDev && <Badge className="bg-yellow-500 text-black text-[10px]">DEBUG: No Filter</Badge>}
           </div>
 
           {scheduleLoading ? (
@@ -313,11 +219,7 @@ const Dashboard = () => {
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
               {todayGames.map((game, index) => (
-                isDev ? (
-                  <DebugGameCard key={`today-${index}`} game={game} index={index} />
-                ) : (
-                  <GameCard key={`today-${game.league}-${game.home.code}-${game.away.code}-${index}`} game={game} />
-                )
+                <GameCard key={`today-${game.league}-${game.home.code}-${game.away.code}-${index}`} game={game} />
               ))}
             </div>
           )}
@@ -328,7 +230,6 @@ const Dashboard = () => {
           <div className="flex items-center gap-2 mb-3">
             <CalendarDays className="h-5 w-5 text-accent" />
             <h2 className="text-lg font-display font-bold text-foreground">이번 주 일정</h2>
-            {isDev && <Badge className="bg-yellow-500 text-black text-[10px]">DEBUG: No Filter</Badge>}
           </div>
 
           {scheduleLoading ? (
@@ -341,10 +242,10 @@ const Dashboard = () => {
                 <div key={date}>
                   <div className="flex items-center gap-2 mb-2">
                     <Badge
-                      variant={isToday(parseISO(date)) ? 'default' : 'secondary'}
-                      className={isToday(parseISO(date)) ? 'gradient-primary text-xs' : 'text-xs'}
+                      variant={date === demoDate ? 'default' : 'secondary'}
+                      className={date === demoDate ? 'gradient-primary text-xs' : 'text-xs'}
                     >
-                      {isToday(parseISO(date))
+                      {date === demoDate
                         ? '오늘'
                         : format(parseISO(date), 'M월 d일 (EEE)', { locale: ko })}
                     </Badge>
@@ -352,11 +253,7 @@ const Dashboard = () => {
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     {games.map((game, index) => (
-                      isDev ? (
-                        <DebugGameCard key={`week-${date}-${index}`} game={game} index={index} />
-                      ) : (
-                        <GameCard key={`week-${date}-${game.league}-${game.home.code}-${game.away.code}-${index}`} game={game} />
-                      )
+                      <GameCard key={`week-${date}-${game.league}-${game.home.code}-${game.away.code}-${index}`} game={game} />
                     ))}
                   </div>
                 </div>

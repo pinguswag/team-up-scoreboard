@@ -44,8 +44,9 @@ type DebugLog = {
 const LEAGUES = ['NBA', 'EPL', 'NFL', 'MLB'] as const;
 const isDev = import.meta.env.DEV;
 
-// DEBUG: Temporarily disable filtering
-const DEBUG_DISABLE_FILTER = true;
+// DEMO MODE: Fixed date for 2022 data
+const DEMO_MODE = true;
+const DEMO_BASE_DATE = '2022-12-22';
 
 // Convert UTC timestamp to KST formatted time string
 const formatKSTTime = (timestamp?: number, dateStr?: string): string | null => {
@@ -195,12 +196,6 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[]) => {
   };
 
   const filterByFavoriteTeams = useCallback((games: ScheduleItem[]): ScheduleItem[] => {
-    // DEBUG: Skip filtering when debug mode is on
-    if (DEBUG_DISABLE_FILTER) {
-      console.log(`[Filter] DISABLED - returning all ${games.length} games`);
-      return games;
-    }
-    
     if (favoriteTeams.length === 0) return [];
 
     return games.filter((game) => {
@@ -215,9 +210,11 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[]) => {
         const teamCode = team.team_code.trim().toLowerCase();
         const teamName = team.team_name.trim().toLowerCase();
         
+        // Code matching first
         if (homeCode === teamCode || awayCode === teamCode) return true;
+        // Exact name match
         if (homeName === teamName || awayName === teamName) return true;
-        
+        // Partial match
         return (
           homeName.includes(teamName) || 
           awayName.includes(teamName) ||
@@ -229,23 +226,24 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[]) => {
   }, [favoriteTeams]);
 
   const fetchSchedules = useCallback(async () => {
-    // DEBUG: Fetch even without favorite teams
-    // if (favoriteTeams.length === 0) {
-    //   setTodayGames([]);
-    //   setWeekGames([]);
-    //   setLoading(false);
-    //   return;
-    // }
+    if (favoriteTeams.length === 0) {
+      setTodayGames([]);
+      setWeekGames([]);
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     setError(null);
     const allLogs: DebugLog[] = [];
 
     try {
-      const today = new Date();
-      const todayStr = format(today, 'yyyy-MM-dd');
+      // DEMO MODE: Use fixed date instead of real today
+      const todayStr = DEMO_MODE ? DEMO_BASE_DATE : format(new Date(), 'yyyy-MM-dd');
       
-      console.log(`[Schedule] Fetching for today: ${todayStr}`);
+      if (isDev) {
+        console.log(`[Schedule] DEMO MODE: ${DEMO_MODE}, Base Date: ${todayStr}`);
+      }
 
       // Fetch today's games for all leagues
       const todayResults = await Promise.all(
@@ -255,18 +253,23 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[]) => {
       const allTodayGames = todayResults.flatMap(r => r.items);
       todayResults.forEach(r => allLogs.push(r.log));
       
-      console.log(`[Schedule] Total today games before filter: ${allTodayGames.length}`);
+      if (isDev) {
+        console.log(`[Schedule] Total today games before filter: ${allTodayGames.length}`);
+      }
       
       const filteredTodayGames = filterByFavoriteTeams(allTodayGames);
-      console.log(`[Schedule] Today games after filter: ${filteredTodayGames.length}`);
+      if (isDev) {
+        console.log(`[Schedule] Today games after filter: ${filteredTodayGames.length}`);
+      }
       
       setTodayGames(filteredTodayGames);
 
-      // Fetch this week's games (7 days)
+      // Fetch this week's games (7 days from demo date)
       const weekData: { date: string; games: ScheduleItem[] }[] = [];
+      const baseDate = DEMO_MODE ? new Date('2022-12-22') : new Date();
       
       for (let i = 0; i < 7; i++) {
-        const date = addDays(today, i);
+        const date = addDays(baseDate, i);
         const dateStr = format(date, 'yyyy-MM-dd');
         
         const dayResults = await Promise.all(
@@ -291,15 +294,17 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[]) => {
       setWeekGames(weekData);
       setDebugLogs(allLogs);
 
-      // Debug summary
-      const successCount = allLogs.filter(l => l.success).length;
-      const failCount = allLogs.filter(l => !l.success).length;
-      const totalItems = allLogs.reduce((sum, l) => sum + l.itemCount, 0);
-      const failedRequests = allLogs.filter(l => !l.success).map(l => `${l.league}/${l.date}: ${l.error}`);
-      console.log(`[Schedule Summary] Success: ${successCount}, Failed: ${failCount}, Total Items: ${totalItems}`);
-      console.log(`[Filtered] Today: ${filteredTodayGames.length}, Week: ${weekData.reduce((sum, d) => sum + d.games.length, 0)}`);
-      if (failedRequests.length > 0) {
-        console.log(`[Failed Requests]`, failedRequests);
+      // Debug summary (dev only)
+      if (isDev) {
+        const successCount = allLogs.filter(l => l.success).length;
+        const failCount = allLogs.filter(l => !l.success).length;
+        const totalItems = allLogs.reduce((sum, l) => sum + l.itemCount, 0);
+        const failedRequests = allLogs.filter(l => !l.success).map(l => `${l.league}/${l.date}: ${l.error}`);
+        console.log(`[Schedule Summary] Success: ${successCount}, Failed: ${failCount}, Total Items: ${totalItems}`);
+        console.log(`[Filtered] Today: ${filteredTodayGames.length}, Week: ${weekData.reduce((sum, d) => sum + d.games.length, 0)}`);
+        if (failedRequests.length > 0) {
+          console.log(`[Failed Requests]`, failedRequests);
+        }
       }
 
     } catch (err) {
@@ -328,5 +333,7 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[]) => {
     debugLogs,
     debugInfo,
     refetch: fetchSchedules,
+    demoMode: DEMO_MODE,
+    demoDate: DEMO_BASE_DATE,
   };
 };
