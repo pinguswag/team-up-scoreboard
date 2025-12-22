@@ -36,12 +36,18 @@ export const useFavoriteTeams = (userId: string | undefined) => {
 
     const { data, error } = await supabase
       .from('favorite_teams')
-      .insert({
-        user_id: userId,
-        league,
-        team_code: teamCode,
-        team_name: teamName,
-      })
+      .upsert(
+        {
+          user_id: userId,
+          league,
+          team_code: teamCode,
+          team_name: teamName,
+        },
+        {
+          onConflict: 'user_id,league,team_code',
+          ignoreDuplicates: false,
+        }
+      )
       .select()
       .single();
 
