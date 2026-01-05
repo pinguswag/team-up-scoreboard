@@ -74,10 +74,14 @@ export const convertUKTimeToKST = (ukTime: string | null | undefined, dateISO?: 
     return { time: null, dateISO: dateISO || null };
   }
 
-  // Parse time (HH:mm format)
-  const timeMatch = ukTime.trim().match(/^(\d{1,2}):(\d{2})$/);
+  const trimmedTime = ukTime.trim();
+  const dateFromString = trimmedTime.match(/(\d{4}-\d{2}-\d{2})/)?.[1] ?? null;
+  const baseDateISO = dateISO || dateFromString;
+
+  // Parse time (supports HH:mm or HH:mm:ss, optionally inside ISO strings)
+  const timeMatch = trimmedTime.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
   if (!timeMatch) {
-    return { time: ukTime.trim(), dateISO: dateISO || null }; // Return original if format is invalid
+    return { time: trimmedTime, dateISO: baseDateISO }; // Return original if format is invalid
   }
 
   const ukHours = parseInt(timeMatch[1], 10);
@@ -105,9 +109,9 @@ export const convertUKTimeToKST = (ukTime: string | null | undefined, dateISO?: 
   const kstTime = `${kstHours.toString().padStart(2, '0')}:${kstMinutes.toString().padStart(2, '0')}`;
 
   // Adjust date if needed
-  let adjustedDateISO = dateISO || null;
+  let adjustedDateISO = baseDateISO || null;
   if (dateAdjustment > 0 && adjustedDateISO) {
-    const date = new Date(adjustedDateISO + 'T00:00:00');
+    const date = new Date(`${adjustedDateISO}T00:00:00Z`);
     date.setDate(date.getDate() + dateAdjustment);
     adjustedDateISO = date.toISOString().slice(0, 10);
   }
