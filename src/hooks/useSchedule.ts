@@ -52,7 +52,7 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[], activeLeague: League)
           });
 
           // API Sports에서 팀 ID 가져오기
-          const teamIdMap = await getTeamIds(teamFullNames, leagueId);
+          const teamIdMap = await getTeamIds(teamFullNames, leagueId, activeLeague);
           const teamIds = Array.from(teamIdMap.values());
 
           if (teamIds.length > 0) {

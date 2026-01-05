@@ -131,36 +131,78 @@ const getHeaders = () => {
   };
 };
 
+const API_SPORTS_TEAM_NAME_OVERRIDES: Partial<Record<League, Record<string, string>>> = {
+  EPL: {
+    'Man City': 'Manchester City',
+    'Man Utd': 'Manchester United',
+    Spurs: 'Tottenham Hotspur',
+    Newcastle: 'Newcastle United',
+    Brighton: 'Brighton & Hove Albion',
+    'West Ham': 'West Ham United',
+    Wolves: 'Wolverhampton Wanderers',
+    "Nott'm Forest": 'Nottingham Forest',
+    Ipswich: 'Ipswich Town',
+    Bournemouth: 'AFC Bournemouth',
+  },
+};
+
+const normalizeTeamKey = (name: string): string =>
+  name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+const getApiSportsTeamName = (league: League, teamName: string): string => {
+  const overrides = API_SPORTS_TEAM_NAME_OVERRIDES[league];
+  if (!overrides) return teamName;
+  const normalized = normalizeTeamKey(teamName);
+  const override = Object.entries(overrides).find(
+    ([key]) => normalizeTeamKey(key) === normalized
+  );
+  return override ? override[1] : teamName;
+};
+
+const fetchTeamSearch = async (
+  searchName: string,
+  leagueId: number
+): Promise<Array<{ team: { id: number; name: string } }>> => {
+  const response = await fetch(
+    `${API_SPORTS_BASE_URL}/teams?league=${leagueId}&search=${encodeURIComponent(searchName)}&season=${new Date().getFullYear()}`,
+    {
+      headers: getHeaders(),
+    }
+  );
+
+  if (!response.ok) {
+    console.error('Team search failed:', response.statusText);
+    return [];
+  }
+
+  const data: { response: Array<{ team: { id: number; name: string } }> } = await response.json();
+  return data.response ?? [];
+};
+
 /**
  * API Sports API에서 팀 ID를 가져옵니다
  * @param teamName - 팀 이름
  * @param leagueId - 리그 ID
+ * @param league - 리그 타입
  * @returns 팀 ID 또는 null
  */
-export const getTeamId = async (teamName: string, leagueId: number): Promise<number | null> => {
+export const getTeamId = async (teamName: string, leagueId: number, league: League): Promise<number | null> => {
   if (!API_KEY) return null;
 
   try {
-    // 리그 내의 팀 검색
-    const response = await fetch(
-      `${API_SPORTS_BASE_URL}/teams?league=${leagueId}&search=${encodeURIComponent(teamName)}&season=${new Date().getFullYear()}`,
-      {
-        headers: getHeaders(),
-      }
-    );
+    const searchName = getApiSportsTeamName(league, teamName);
+    let responseItems = await fetchTeamSearch(searchName, leagueId);
 
-    if (!response.ok) {
-      console.error('Team search failed:', response.statusText);
-      return null;
+    if (responseItems.length === 0 && searchName !== teamName) {
+      responseItems = await fetchTeamSearch(teamName, leagueId);
     }
 
-    const data: { response: Array<{ team: { id: number; name: string } }> } = await response.json();
-    if (data.response && data.response.length > 0) {
+    if (responseItems.length > 0) {
       // 가장 유사한 팀 이름 매칭
-      const team = data.response.find(t => 
+      const team = responseItems.find(t => 
         t.team.name.toLowerCase().includes(teamName.toLowerCase()) ||
         teamName.toLowerCase().includes(t.team.name.toLowerCase())
-      ) || data.response[0];
+      ) || responseItems[0];
       return team.team.id;
     }
 
@@ -179,7 +221,8 @@ export const getTeamId = async (teamName: string, leagueId: number): Promise<num
  */
 export const getTeamIds = async (
   teamNames: string[],
-  leagueId: number
+  leagueId: number,
+  league: League
 ): Promise<Map<string, number>> => {
   const teamIdMap = new Map<string, number>();
   
@@ -188,7 +231,7 @@ export const getTeamIds = async (
   // 각 팀에 대해 ID 조회
   await Promise.all(
     teamNames.map(async (teamName) => {
-      const teamId = await getTeamId(teamName, leagueId);
+      const teamId = await getTeamId(teamName, leagueId, league);
       if (teamId) {
         teamIdMap.set(teamName, teamId);
       }
@@ -361,4 +404,3 @@ export const convertApiSportsFixture = (
     _kstTime: true, // 이미 KST로 변환되었음을 표시
   };
 };
-
