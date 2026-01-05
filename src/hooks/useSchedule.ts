@@ -6,6 +6,12 @@ import {
   normalizeFixture, 
   sortFixtures 
 } from '@/lib/scheduleUtils';
+import { 
+  fetchFixtures, 
+  getTeamIds, 
+  convertApiSportsFixture,
+  LEAGUE_IDS 
+} from '@/lib/apiSports';
 
 export const useSchedule = (favoriteTeams: FavoriteTeam[], activeLeague: League) => {
   const [fixtures, setFixtures] = useState<NormalizedFixture[]>([]);
@@ -33,16 +39,55 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[], activeLeague: League)
     setError(null);
 
     try {
-      // 팀 이름 목록 (fullName 기준)
+      const apiKey = import.meta.env.VITE_API_SPORTS_KEY;
+      const leagueId = LEAGUE_IDS[activeLeague];
+
+      // API Sports API를 사용할 수 있는 경우 (EPL만 지원)
+      if (apiKey && leagueId) {
+        try {
+          // 팀 이름 목록 (fullName 기준)
+          const teamFullNames = selectedTeams.map(t => {
+            const team = TEAMS[activeLeague].find(tm => tm.code === t.team_code);
+            return team?.fullName || t.team_name;
+          });
+
+          // API Sports에서 팀 ID 가져오기
+          const teamIdMap = await getTeamIds(teamFullNames, leagueId);
+          const teamIds = Array.from(teamIdMap.values());
+
+          if (teamIds.length > 0) {
+            // API Sports에서 경기 일정 가져오기
+            const apiFixtures = await fetchFixtures(activeLeague, teamIds);
+            
+            // API Sports 응답을 내부 형식으로 변환
+            const convertedFixtures = apiFixtures.map(fixture => 
+              convertApiSportsFixture(fixture, activeLeague)
+            );
+
+            // Normalize all fixtures (Supabase 형식과 동일하게 처리)
+            const normalizedFixtures = convertedFixtures.map((row: any) => 
+              normalizeFixture(row, activeLeague)
+            );
+
+            // Sort and set
+            const sorted = sortFixtures(normalizedFixtures);
+            setFixtures(sorted);
+            return;
+          }
+        } catch (apiError) {
+          console.warn('API Sports API 실패, Supabase로 fallback:', apiError);
+          // API Sports 실패 시 Supabase로 fallback
+        }
+      }
+
+      // Supabase fallback (기존 로직)
       const teamFullNames = selectedTeams.map(t => {
         const team = TEAMS[activeLeague].find(tm => tm.code === t.team_code);
         return team?.fullName || t.team_name;
       });
 
-      // 테이블명 (epl/nfl)
       const tableName = activeLeague.toLowerCase();
 
-      // 쿼리: home_team 또는 away_team이 선택된 팀인 경기
       const { data, error: queryError } = await supabase
         .from(tableName)
         .select('*')
@@ -56,12 +101,10 @@ export const useSchedule = (favoriteTeams: FavoriteTeam[], activeLeague: League)
         setError(queryError.message);
         setFixtures([]);
       } else {
-        // Normalize all fixtures
         const normalizedFixtures = (data || []).map((row: any) => 
           normalizeFixture(row, activeLeague)
         );
 
-        // Sort and set
         const sorted = sortFixtures(normalizedFixtures);
         setFixtures(sorted);
       }

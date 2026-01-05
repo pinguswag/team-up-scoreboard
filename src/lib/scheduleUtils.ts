@@ -62,6 +62,60 @@ export const normalizeTimeString = (t: string | null | undefined): string | null
 };
 
 /**
+ * Convert UK time (GMT/BST) to KST (Korean Standard Time)
+ * UK time is 9 hours behind KST (GMT) or 8 hours (BST)
+ * For simplicity, we use 9 hours offset (GMT standard)
+ * @param ukTime - Time string in HH:mm format (UK time)
+ * @param dateISO - Date string in YYYY-MM-DD format (optional, for date overflow handling)
+ * @returns Time string in HH:mm format (KST) or null
+ */
+export const convertUKTimeToKST = (ukTime: string | null | undefined, dateISO?: string | null): { time: string | null; dateISO: string | null } => {
+  if (!ukTime || typeof ukTime !== 'string') {
+    return { time: null, dateISO: dateISO || null };
+  }
+
+  // Parse time (HH:mm format)
+  const timeMatch = ukTime.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!timeMatch) {
+    return { time: ukTime.trim(), dateISO: dateISO || null }; // Return original if format is invalid
+  }
+
+  const ukHours = parseInt(timeMatch[1], 10);
+  const ukMinutes = parseInt(timeMatch[2], 10);
+
+  // Add 9 hours for GMT -> KST conversion
+  // (BST is 8 hours, but we'll use 9 as standard to cover most cases)
+  let kstHours = ukHours + 9;
+  let kstMinutes = ukMinutes;
+  let dateAdjustment = 0;
+
+  // Handle minutes overflow
+  if (kstMinutes >= 60) {
+    kstHours += Math.floor(kstMinutes / 60);
+    kstMinutes = kstMinutes % 60;
+  }
+
+  // Handle hours overflow (next day)
+  if (kstHours >= 24) {
+    dateAdjustment = Math.floor(kstHours / 24);
+    kstHours = kstHours % 24;
+  }
+
+  // Format KST time
+  const kstTime = `${kstHours.toString().padStart(2, '0')}:${kstMinutes.toString().padStart(2, '0')}`;
+
+  // Adjust date if needed
+  let adjustedDateISO = dateISO || null;
+  if (dateAdjustment > 0 && adjustedDateISO) {
+    const date = new Date(adjustedDateISO + 'T00:00:00');
+    date.setDate(date.getDate() + dateAdjustment);
+    adjustedDateISO = date.toISOString().slice(0, 10);
+  }
+
+  return { time: kstTime, dateISO: adjustedDateISO };
+};
+
+/**
  * Normalize a raw fixture row from EPL or NFL table
  * @param row - Raw row from database
  * @param league - League type
@@ -72,9 +126,26 @@ export const normalizeFixture = (row: any, league: League): NormalizedFixture =>
   
   let time: string | null = null;
   let weekLabel: string | null = null;
+  let finalDateISO = dateISO;
   
   if (league === 'EPL') {
-    time = normalizeTimeString(row.time);
+    // API Sports API에서 온 데이터인 경우, 이미 KST로 변환되었으므로 그대로 사용
+    // Supabase에서 온 데이터인 경우, UK 시간을 KST로 변환
+    const timeString = normalizeTimeString(row.time);
+    if (timeString) {
+      // row._fromApiSports 플래그가 있으면 이미 변환된 시간이므로 그대로 사용
+      // 또는 날짜가 KST로 변환되었는지 확인 (dateISO가 원본과 다르면 변환됨)
+      if (row._fromApiSports || row._kstTime) {
+        // API Sports에서 온 데이터: 이미 KST로 변환됨
+        time = timeString;
+        finalDateISO = dateISO; // 날짜도 이미 변환됨
+      } else {
+        // Supabase에서 온 데이터: UK 시간을 KST로 변환
+        const kstResult = convertUKTimeToKST(timeString, dateISO);
+        time = kstResult.time;
+        finalDateISO = kstResult.dateISO || dateISO;
+      }
+    }
     weekLabel = row.matchweek ? `MW ${row.matchweek}` : null;
   } else if (league === 'NFL') {
     // NFL may have et_time or local_time
@@ -83,8 +154,8 @@ export const normalizeFixture = (row: any, league: League): NormalizedFixture =>
   }
   
   return {
-    id: row.id || `${dateISO}-${row.home_team}-${row.away_team}`,
-    dateISO,
+    id: row.id || `${finalDateISO}-${row.home_team}-${row.away_team}`,
+    dateISO: finalDateISO,
     time,
     homeTeam: row.home_team || '',
     awayTeam: row.away_team || '',
