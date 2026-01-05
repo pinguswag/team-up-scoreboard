@@ -14,7 +14,7 @@ import {
   getTodayISO,
   NormalizedFixture 
 } from '@/lib/scheduleUtils';
-import { CalendarDays, Settings, LogOut, Loader2, Clock, Trophy, Construction } from 'lucide-react';
+import { CalendarDays, Settings, LogOut, Loader2, Clock, Trophy, Construction, Radio } from 'lucide-react';
 
 const FILTER_OPTIONS: { value: DateFilter; label: string }[] = [
   { value: 'today', label: 'Today' },
@@ -269,22 +269,46 @@ const Dashboard = () => {
                         
                         <div className="space-y-2">
                           {dateFixtures.map((fixture) => (
-                            <Card key={fixture.id} className="glass border-border/50 hover:border-primary/30 transition-all">
+                            <Card key={fixture.id} className={`glass border-border/50 hover:border-primary/30 transition-all ${fixture.isLive ? 'border-primary/50 ring-2 ring-primary/20' : ''}`}>
                               <CardContent className="p-4">
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center gap-3 flex-1 min-w-0">
                                     {fixture.time && (
                                       <div className="flex items-center gap-1 text-sm text-muted-foreground flex-shrink-0">
-                                        <Clock className="h-4 w-4" />
-                                        {fixture.time}
+                                        {fixture.isLive ? (
+                                          <div className="flex items-center gap-1 text-primary">
+                                            <Radio className="h-4 w-4 animate-pulse" />
+                                            <span className="font-semibold">LIVE</span>
+                                            {fixture.elapsed && (
+                                              <span className="text-xs">({fixture.elapsed}')</span>
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <>
+                                            <Clock className="h-4 w-4" />
+                                            {fixture.time}
+                                          </>
+                                        )}
                                       </div>
                                     )}
                                     <div className="flex-1 min-w-0">
-                                      <p className="font-medium text-foreground truncate">
-                                        {fixture.awayTeam} @ {fixture.homeTeam}
-                                      </p>
+                                      <div className="flex items-center gap-2">
+                                        <p className="font-medium text-foreground truncate">
+                                          {fixture.awayTeam} @ {fixture.homeTeam}
+                                        </p>
+                                        {(fixture.homeScore !== null || fixture.awayScore !== null) && (
+                                          <div className="flex items-center gap-1 text-sm font-semibold text-foreground flex-shrink-0">
+                                            <span>{fixture.awayScore ?? '-'}</span>
+                                            <span className="text-muted-foreground">:</span>
+                                            <span>{fixture.homeScore ?? '-'}</span>
+                                          </div>
+                                        )}
+                                      </div>
                                       {fixture.weekLabel && (
                                         <p className="text-xs text-muted-foreground">{fixture.weekLabel}</p>
+                                      )}
+                                      {fixture.status && fixture.status !== 'NS' && fixture.status !== 'TBD' && !fixture.isLive && (
+                                        <p className="text-xs text-muted-foreground capitalize">{fixture.status}</p>
                                       )}
                                     </div>
                                   </div>

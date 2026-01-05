@@ -4,7 +4,10 @@
 import { League } from '@/data/teams';
 
 // API Sports API 설정
-const API_SPORTS_BASE_URL = 'https://v3.football.api-sports.io';
+// Football (Soccer) API
+const API_SPORTS_FOOTBALL_BASE_URL = 'https://v3.football.api-sports.io';
+// American Football API
+const API_SPORTS_AMERICAN_FOOTBALL_BASE_URL = 'https://v3.americanfootball.api-sports.io';
 const API_KEY = import.meta.env.VITE_API_SPORTS_KEY;
 
 /**
@@ -112,8 +115,8 @@ export type ApiSportsTeamResponse = {
  * 리그별 API Sports League ID
  */
 export const LEAGUE_IDS: Record<League, number | null> = {
-  EPL: 39, // Premier League
-  NFL: null, // NFL은 별도 API 필요
+  EPL: 39, // Premier League (Football/Soccer)
+  NFL: 1, // NFL (American Football) - API Sports American Football API
   NBA: null, // NBA는 별도 API 필요
   MLB: null, // MLB는 별도 API 필요
 };
@@ -132,18 +135,29 @@ const getHeaders = () => {
 };
 
 /**
+ * 리그에 따른 API Base URL 반환
+ */
+const getBaseUrl = (league: League): string => {
+  if (league === 'NFL') {
+    return API_SPORTS_AMERICAN_FOOTBALL_BASE_URL;
+  }
+  return API_SPORTS_FOOTBALL_BASE_URL;
+};
+
+/**
  * API Sports API에서 팀 ID를 가져옵니다
  * @param teamName - 팀 이름
  * @param leagueId - 리그 ID
  * @returns 팀 ID 또는 null
  */
-export const getTeamId = async (teamName: string, leagueId: number): Promise<number | null> => {
+export const getTeamId = async (teamName: string, leagueId: number, league: League): Promise<number | null> => {
   if (!API_KEY) return null;
 
   try {
+    const baseUrl = getBaseUrl(league);
     // 리그 내의 팀 검색
     const response = await fetch(
-      `${API_SPORTS_BASE_URL}/teams?league=${leagueId}&search=${encodeURIComponent(teamName)}&season=${new Date().getFullYear()}`,
+      `${baseUrl}/teams?league=${leagueId}&search=${encodeURIComponent(teamName)}&season=${new Date().getFullYear()}`,
       {
         headers: getHeaders(),
       }
@@ -179,7 +193,8 @@ export const getTeamId = async (teamName: string, leagueId: number): Promise<num
  */
 export const getTeamIds = async (
   teamNames: string[],
-  leagueId: number
+  leagueId: number,
+  league: League
 ): Promise<Map<string, number>> => {
   const teamIdMap = new Map<string, number>();
   
@@ -188,7 +203,7 @@ export const getTeamIds = async (
   // 각 팀에 대해 ID 조회
   await Promise.all(
     teamNames.map(async (teamName) => {
-      const teamId = await getTeamId(teamName, leagueId);
+      const teamId = await getTeamId(teamName, leagueId, league);
       if (teamId) {
         teamIdMap.set(teamName, teamId);
       }
@@ -239,8 +254,9 @@ export const fetchFixtures = async (
     const uniqueFixtureIds = new Set<number>();
 
     // API 호출을 배치로 처리 (동시 요청 제한 방지)
+    const baseUrl = getBaseUrl(league);
     for (const teamId of teamIds) {
-      const url = new URL(`${API_SPORTS_BASE_URL}/fixtures`);
+      const url = new URL(`${baseUrl}/fixtures`);
       url.searchParams.append('league', leagueId.toString());
       url.searchParams.append('season', new Date().getFullYear().toString());
       url.searchParams.append('team', teamId.toString());
@@ -306,6 +322,10 @@ export const convertApiSportsFixture = (
   away_team: string;
   matchweek: number | null;
   status: string;
+  home_score: number | null;
+  away_score: number | null;
+  is_live: boolean;
+  elapsed: number | null;
   _fromApiSports?: boolean;
   _kstTime?: boolean;
 } => {
@@ -340,14 +360,27 @@ export const convertApiSportsFixture = (
   // 날짜 오프셋 적용
   const finalDate = new Date(Date.UTC(utcYear, utcMonth, utcDay + dateOffset));
   const finalDateISO = `${finalDate.getUTCFullYear()}-${String(finalDate.getUTCMonth() + 1).padStart(2, '0')}-${String(finalDate.getUTCDate()).padStart(2, '0')}`;
-  
-  console.log('KST 변환 결과:', { kstTime, finalDateISO });
 
-  // Matchweek 추출 (라운드 정보에서)
-  // 예: "Regular Season - 1", "Matchweek 1" 등
-  const matchweekMatch = fixture.league.round?.match(/Matchweek\s*(\d+)/i) || 
-                         fixture.league.round?.match(/(\d+)/);
-  const matchweek = matchweekMatch ? parseInt(matchweekMatch[1], 10) : null;
+  // Matchweek/Week 추출 (라운드 정보에서)
+  // EPL: "Matchweek 1", NFL: "Week 1" 등
+  let matchweek: number | null = null;
+  if (league === 'EPL') {
+    const matchweekMatch = fixture.league.round?.match(/Matchweek\s*(\d+)/i) || 
+                           fixture.league.round?.match(/(\d+)/);
+    matchweek = matchweekMatch ? parseInt(matchweekMatch[1], 10) : null;
+  } else if (league === 'NFL') {
+    const weekMatch = fixture.league.round?.match(/Week\s*(\d+)/i) || 
+                      fixture.league.round?.match(/(\d+)/);
+    matchweek = weekMatch ? parseInt(weekMatch[1], 10) : null;
+  }
+
+  // 경기 결과(스코어) 정보
+  const homeScore = fixture.goals?.home ?? fixture.score?.fulltime?.home ?? null;
+  const awayScore = fixture.goals?.away ?? fixture.score?.fulltime?.away ?? null;
+  const isLive = fixture.fixture.status.short === 'LIVE' || 
+                 fixture.fixture.status.short === 'HT' ||
+                 fixture.fixture.status.short === '1H' ||
+                 fixture.fixture.status.short === '2H';
 
   return {
     id: fixture.fixture.id.toString(),
@@ -357,8 +390,13 @@ export const convertApiSportsFixture = (
     away_team: fixture.teams.away.name,
     matchweek,
     status: fixture.fixture.status.short,
+    home_score: homeScore,
+    away_score: awayScore,
+    is_live: isLive,
+    elapsed: fixture.fixture.status.elapsed,
     _fromApiSports: true, // API Sports에서 온 데이터임을 표시
     _kstTime: true, // 이미 KST로 변환되었음을 표시
   };
 };
+
 

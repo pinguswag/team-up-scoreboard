@@ -13,6 +13,11 @@ export type NormalizedFixture = {
   awayTeam: string;
   weekLabel: string | null;
   league: League;
+  homeScore?: number | null;
+  awayScore?: number | null;
+  isLive?: boolean;
+  status?: string;
+  elapsed?: number | null;
 };
 
 /**
@@ -148,9 +153,20 @@ export const normalizeFixture = (row: any, league: League): NormalizedFixture =>
     }
     weekLabel = row.matchweek ? `MW ${row.matchweek}` : null;
   } else if (league === 'NFL') {
-    // NFL may have et_time or local_time
-    time = normalizeTimeString(row.et_time ?? row.local_time ?? row.time);
-    weekLabel = row.week ? `Week ${row.week}` : null;
+    // API Sports API에서 온 데이터인 경우, 이미 KST로 변환되었으므로 그대로 사용
+    // Supabase에서 온 데이터인 경우, 시간 그대로 사용
+    const timeString = normalizeTimeString(row.et_time ?? row.local_time ?? row.time);
+    if (timeString) {
+      if (row._fromApiSports || row._kstTime) {
+        // API Sports에서 온 데이터: 이미 KST로 변환됨
+        time = timeString;
+        finalDateISO = dateISO;
+      } else {
+        // Supabase에서 온 데이터: 그대로 사용
+        time = timeString;
+      }
+    }
+    weekLabel = row.matchweek ? `Week ${row.matchweek}` : (row.week ? `Week ${row.week}` : null);
   }
   
   return {
@@ -161,6 +177,11 @@ export const normalizeFixture = (row: any, league: League): NormalizedFixture =>
     awayTeam: row.away_team || '',
     weekLabel,
     league,
+    homeScore: row.home_score ?? null,
+    awayScore: row.away_score ?? null,
+    isLive: row.is_live ?? false,
+    status: row.status ?? null,
+    elapsed: row.elapsed ?? null,
   };
 };
 
